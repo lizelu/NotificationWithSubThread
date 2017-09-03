@@ -9,21 +9,22 @@
 #import "SecondViewController.h"
 
 @interface SecondViewController ()<NSMachPortDelegate>
-@property (nonatomic, strong) NSMutableArray    *notificationsQueue;         // 通知队列
-@property (nonatomic, strong) NSThread          *mainThread;    // 期望线程
-@property (nonatomic, strong) NSLock            *lock;      // 用于对通知队列加锁的锁对象，避免线程冲突
-@property (nonatomic, strong) NSMachPort        *mackPort;      // 用于向期望线程发送信号的通信端口
+@property (nonatomic, strong) NSMutableArray    *notificationsQueue;    //存储子线程发出的通知的队列
+@property (nonatomic, strong) NSThread          *mainThread;            // 处理通知事件的预期线程
+@property (nonatomic, strong) NSLock            *lock;                  // 用于对通知队列加锁的锁对象，避免线程冲突
+@property (nonatomic, strong) NSMachPort        *mackPort;              // 用于向期望线程发送信号的通信端口
 @end
 
 @implementation SecondViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    
     self.view.backgroundColor = [UIColor whiteColor];
+    
+    //打印注册观察者的线程，此处也就是主线程
     NSLog(@"register notificaton thread = %@", [NSThread currentThread]);
    
-    [self setUpThreadingSupport];
+    [self setUpThreadingSupport]; // 对相关的成员属性进行初始
     
     [[NSNotificationCenter defaultCenter]
      addObserver:self
@@ -34,22 +35,24 @@
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSLog(@"post notificaton thread = %@", [NSThread currentThread]);
         [[NSNotificationCenter defaultCenter] postNotificationName:@"NotificationName" object:nil userInfo:nil];
-        
     });
 }
 
+
+/**
+ 对相关的成员属性进行初始
+ */
 - (void) setUpThreadingSupport {
     if (self.notificationsQueue) {
         return;
     }
-    self.notificationsQueue      = [[NSMutableArray alloc] init];    //队列：用来暂存其他线程发出的通知
-    self.lock   = [[NSLock alloc] init];            //负责栈操作的原子性
-    self.mainThread = [NSThread currentThread];         //记录处理通知的线程
-    
-    self.mackPort = [[NSMachPort alloc] init];          //负责往处理通知的线程所对应的RunLoop中发送消息的
+    self.notificationsQueue = [[NSMutableArray alloc] init];    //队列：用来暂存其他线程发出的通知
+    self.lock = [[NSLock alloc] init];                          //负责栈操作的原子性
+    self.mainThread = [NSThread currentThread];                 //记录处理通知的线程
+    self.mackPort = [[NSMachPort alloc] init];                  //负责往处理通知的线程所对应的RunLoop中发送消息的
     [self.mackPort setDelegate:self];
     
-    [[NSRunLoop currentRunLoop] addPort:self.mackPort   //将Mac Port添加到处理通知的线程中的RunLoop中
+    [[NSRunLoop currentRunLoop] addPort:self.mackPort           //将Mac Port添加到处理通知的线程中的RunLoop中
                                 forMode:(__bridge NSString *)kCFRunLoopCommonModes];
 }
 
@@ -65,6 +68,7 @@
     
     NSLog(@"handle Mach Message thread = %@", [NSThread currentThread]);
     
+    //在子线程中对notificationsQueue队列操作时，需要加锁，保持队列中数据的正确性
     [self.lock lock];
     
     //依次取出队列中所暂存的Notification，然后在当前线程中处理该通知
@@ -85,9 +89,12 @@
 
 - (void)processNotification:(NSNotification *)notification {
     
-    //在子线程中收到通知后，将收到的通知放入到队列中存储，然后给主线程的RunLoop发送处理通知的消息
-    if ([NSThread currentThread] != _mainThread) {
+    if ([NSThread currentThread] == _mainThread) {
+        //处理出队列中的通知
+        NSLog(@"handle notification thread = %@", [NSThread currentThread]);
+        NSLog(@"process notification");
         
+    } else { //在子线程中收到通知后，将收到的通知放入到队列中存储，然后给主线程的RunLoop发送处理通知的消息
         NSLog(@"transfer notification thread = %@", [NSThread currentThread]);
         
         // Forward the notification to the correct thread.
@@ -97,13 +104,10 @@
         
         //通过MacPort给处理通知的线程发送通知，使其处理队列中所暂存的队列
         [self.mackPort sendBeforeDate:[NSDate date]
-                                   components:nil
-                                         from:nil
-                                     reserved:0];
-    } else {
-        //处理出队列中的通知
-        NSLog(@"handle notification thread = %@", [NSThread currentThread]);
-        NSLog(@"process notification");
+                           components:nil
+                                 from:nil
+                             reserved:0];
+
     }
 }
 
