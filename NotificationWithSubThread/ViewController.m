@@ -37,7 +37,7 @@
  @param notification notification
  */
 - (void)handleNotification:(NSNotification *)notification {
-    //打印处理通知的方法
+    //打印处理通知方法的线程
     NSLog(@"handle notification thread = %@", [NSThread currentThread]);
 }
 
